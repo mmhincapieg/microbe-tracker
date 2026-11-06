@@ -1,12 +1,17 @@
 import cv2
 import pandas as pd
-from detector import TardigradeDetector
+from .detector import create_background_subtractor, detect_tardigrade
 
-def track_video(video_path, output_csv=None):
-    cap = cv2.VideoCapture("01_sampleclip.mov", "/Users/mariamanuh/CodingProjects/microbe-tracker/data")
+def track_video(video_path, output_csv=None, min_area=800, max_area=15000):
+    """
+    Lee un archivo de video, detecta al tardígrado fotograma a fotograma
+    y extrae sus métricas de posición y forma a lo largo del tiempo.
+    """
+    cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     
-    detector = TardigradeDetector(min_area=800) # Adjusted for typical tardigrade size
+    # Creamos el sustractor de fondo mediante la función auxiliar
+    bg_subtractor = create_background_subtractor()
     records = []
     frame_idx = 0
 
@@ -15,10 +20,11 @@ def track_video(video_path, output_csv=None):
         if not ret:
             break
             
-        contour, _ = detector.detect(frame)
+        # Llamamos a la función de detección directamente
+        contour, _ = detect_tardigrade(frame, bg_subtractor, min_area=min_area, max_area=max_area)
         
         if contour is not None:
-            # 1. Centroid (Center of Mass)
+            # 1. Centroide (Centro de masa del cuerpo)
             M = cv2.moments(contour)
             if M["m00"] != 0:
                 cx = M["m10"] / M["m00"]
@@ -26,15 +32,15 @@ def track_video(video_path, output_csv=None):
             else:
                 cx, cy = 0, 0
                 
-            # 2. Shape Dynamics (Fitted Ellipse for Body Extension/Compression)
+            # 2. Dinámica de forma (Ajustar una elipse para medir extensión/compresión)
             if len(contour) >= 5:
-                # fitEllipse returns: (center_x, center_y), (minor_axis, major_axis), angle
+                # fitEllipse devuelve: (centro), (eje_menor, eje_mayor), ángulo
                 _, (d1, d2), angle = cv2.fitEllipse(contour)
                 length = max(d1, d2)
                 width = min(d1, d2)
                 aspect_ratio = length / (width + 1e-6)
             else:
-                # Fallback to bounding box if contour is too small
+                # Alternativa si el contorno tiene muy pocos puntos para una elipse
                 x, y, w, h = cv2.boundingRect(contour)
                 length = max(w, h)
                 width = min(w, h)
